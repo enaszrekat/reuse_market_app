@@ -1,0 +1,13 @@
+{
+  "welcome": "Welcome Back!",
+  "email": "Email",
+  "password": "Password",
+  "login": "Login",
+  "register": "Register",
+  "no_account": "Don't have an account?",
+  "admin_login": "Admin Login",
+  "home": "Home",
+  "add": "Add",
+  "my_products": "My Products",
+  "profile": "Profile"
+}
