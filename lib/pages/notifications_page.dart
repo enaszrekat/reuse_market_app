@@ -11,97 +11,164 @@ class NotificationsPage extends StatefulWidget {
 }
 
 class _NotificationsPageState extends State<NotificationsPage> {
-  List notifications = [];
-  bool loading = true;
-
   final String baseUrl = "http://10.100.11.28/market_app/";
+  bool loading = true;
+  List notifications = [];
+  int myId = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadNotifications();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    myId = int.tryParse(prefs.getString("user_id") ?? "0") ?? 0;
+    await _loadNotifications();
   }
 
   Future<void> _loadNotifications() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString("user_id") ?? "";
+    setState(() => loading = true);
 
-    final response = await http.get(
-      Uri.parse("${baseUrl}get_notifications.php?user_id=$userId"),
-    );
+    try {
+      final res = await http.get(
+        Uri.parse("${baseUrl}get_notifications.php?user_id=$myId"),
+      );
 
-    final data = json.decode(response.body);
+      final data = json.decode(res.body);
+      if (data["status"] == "success") {
+        notifications = data["notifications"] ?? [];
+        _markAllAsRead();
+      }
+    } catch (_) {}
 
-    if (data["status"] == "success") {
-      setState(() {
-        notifications = data["notifications"];
-        loading = false;
-      });
-    } else {
-      setState(() => loading = false);
+    setState(() => loading = false);
+  }
+
+  Future<void> _markAllAsRead() async {
+    try {
+      await http.post(
+        Uri.parse("${baseUrl}mark_notifications_read.php"),
+        body: {"user_id": myId.toString()},
+      );
+    } catch (_) {}
+  }
+
+  String _formatTime(String t) {
+    try {
+      final d = DateTime.parse(t);
+      return "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
+    } catch (_) {
+      return "";
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0E1412),
       appBar: AppBar(
-        title: const Text("Notifications"),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.amber,
+        backgroundColor: const Color(0xFF0E1412),
+        elevation: 0,
+        title: const Text(
+          "Notifications",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
       body: loading
           ? const Center(
-              child: CircularProgressIndicator(color: Colors.amber),
+              child: CircularProgressIndicator(color: Color(0xFF3DDC97)),
             )
           : notifications.isEmpty
               ? const Center(
                   child: Text(
                     "No notifications yet",
-                    style: TextStyle(color: Colors.white70, fontSize: 18),
+                    style: TextStyle(color: Colors.white54, fontSize: 15),
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: notifications.length,
-                  itemBuilder: (context, index) {
-                    final n = notifications[index];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white10,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            n["title"],
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.amber,
+              : RefreshIndicator(
+                  color: const Color(0xFF3DDC97),
+                  onRefresh: _loadNotifications,
+                  child: ListView.builder(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: notifications.length,
+                    itemBuilder: (_, i) {
+                      final n = notifications[i];
+                      final bool unread =
+                          n["is_read"].toString() == "0";
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: unread
+                              ? const Color(0xFF1C2622)
+                              : const Color(0xFF141B18),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: unread
+                                ? const Color(0xFF3DDC97)
+                                    .withOpacity(0.4)
+                                : Colors.white12,
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              margin:
+                                  const EdgeInsets.only(top: 6, right: 10),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: unread
+                                    ? const Color(0xFF3DDC97)
+                                    : Colors.transparent,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            n["body"],
-                            style: const TextStyle(
-                                fontSize: 14, color: Colors.white70),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            n["created_at"],
-                            style: const TextStyle(
-                                fontSize: 12, color: Colors.white38),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    n["title"] ?? "",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: unread
+                                          ? FontWeight.bold
+                                          : FontWeight.w600,
+                                      fontSize: 14.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    n["body"] ?? "",
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13.5,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _formatTime(n["created_at"] ?? ""),
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
     );
   }

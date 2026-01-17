@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import '../main.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'localization/app_localizations.dart';
 
 class LoginPage extends StatefulWidget {
   final Function(Locale) onLangChange;
@@ -14,34 +12,24 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final email = TextEditingController();
-  final pass = TextEditingController();
+  final password = TextEditingController();
 
-  final String serverUrl = "http://localhost/market_app/login.php";
-  bool loading = false;
+  void _changeLanguage() {
+    final current = Localizations.localeOf(context);
+    final newLocale =
+        current.languageCode == 'en' ? const Locale('ar') : const Locale('en');
+    widget.onLangChange(newLocale);
+  }
 
-  String currentLang = "en";
-
-  Future<bool> loginUser(String email, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse(serverUrl),
-        body: {"email": email, "password": password},
+  void _login() {
+    if (email.text.isEmpty || password.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fill all fields")),
       );
-
-      final data = json.decode(response.body);
-
-      if (data["status"] == "success") {
-        final prefs = await SharedPreferences.getInstance();
-        prefs.setString("user_id", data["user"]["id"].toString());
-        prefs.setString("name", data["user"]["name"]);
-        prefs.setString("email", data["user"]["email"]);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print("LOGIN ERROR: $e");
-      return false;
+      return;
     }
+
+    Navigator.pushReplacementNamed(context, "/home");
   }
 
   @override
@@ -50,180 +38,159 @@ class _LoginPageState extends State<LoginPage> {
     final t = AppLocalizations(locale);
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 35),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
+      backgroundColor: const Color(0xFFF6F7F8),
 
-              // 🔥 زر تغيير اللغة
-              Align(
-                alignment: Alignment.topRight,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade100,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      dropdownColor: Colors.green.shade50,
-                      value: currentLang,
-                      icon: const Icon(Icons.language, color: Colors.black),
-                      style: const TextStyle(color: Colors.black),
-                      items: const [
-                        DropdownMenuItem(value: "en", child: Text("English")),
-                        DropdownMenuItem(value: "ar", child: Text("العربية")),
-                        DropdownMenuItem(value: "he", child: Text("עברית")),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => currentLang = value);
-                          widget.onLangChange(Locale(value));
-                        }
-                      },
-                    ),
-                  ),
+      /// 🔥 الحل هنا: Scroll قبل الـ Container
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 30),
+        child: Center(
+          child: Container(
+            width: MediaQuery.of(context).size.width < 500
+                ? double.infinity
+                : 460,
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.fromLTRB(40, 36, 40, 36),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(34),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 40,
+                  offset: const Offset(0, 25),
                 ),
-              ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset('assets/logo.png', height: 160),
+                const SizedBox(height: 40),
 
-              const SizedBox(height: 25),
-
-              // 🌿 اللوجو (مكبّر)
-              Image.asset(
-                "assets/logo.png",
-                width: 230,
-                height: 230,
-              ),
-
-              const SizedBox(height: 25),
-
-              // 📩 Email
-              _input(t.t("email"), email, false),
-
-              const SizedBox(height: 14),
-
-              // 🔒 Password
-              _input(t.t("password"), pass, true),
-
-              const SizedBox(height: 20),
-
-              // زر تسجيل الدخول أخضر
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    setState(() => loading = true);
-
-                    bool ok = await loginUser(
-                      email.text.trim(),
-                      pass.text.trim(),
-                    );
-
-                    setState(() => loading = false);
-
-                    if (ok) {
-                      Navigator.pushReplacementNamed(context, "/home");
-                    } else {
-                      _error(locale);
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                /// TITLE + LANGUAGE
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      t.t("login"),
+                      style: GoogleFonts.poppins(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.green,
+                      ),
                     ),
-                  ),
-                  child: loading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Text(
-                          t.t("login"),
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                    InkWell(
+                      onTap: _changeLanguage,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.language, color: Colors.green),
+                          const SizedBox(width: 6),
+                          Text(
+                            locale.languageCode == 'en'
+                                ? "English"
+                                : "العربية",
+                            style: GoogleFonts.poppins(
+                              fontSize: 15,
+                              color: Colors.green,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                        ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
 
-              const SizedBox(height: 10),
+                const SizedBox(height: 28),
 
-              // Register
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    t.t("no_account"),
-                    style: const TextStyle(color: Colors.black),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pushNamed(context, "/register");
-                    },
+                _input(Icons.email_outlined, t.t("email"), email),
+                const SizedBox(height: 18),
+                _input(Icons.lock_outline, t.t("password"), password,
+                    isPassword: true),
+
+                const SizedBox(height: 34),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                    ),
                     child: Text(
-                      t.t("register"),
-                      style: TextStyle(
-                        color: Colors.green.shade700,
-                        fontWeight: FontWeight.bold,
+                      t.t("login"),
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
 
-              TextButton(
-                onPressed: () {
-                  Navigator.pushNamed(context, "/admin-login");
-                },
-                child: Text(
-                  t.t("admin_login"),
-                  style: TextStyle(
-                    color: Colors.green.shade700,
-                    fontWeight: FontWeight.bold,
+                const SizedBox(height: 18),
+
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pushReplacementNamed(context, "/register"),
+                  child: Text(
+                    t.t("register"),
+                    style: GoogleFonts.poppins(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
-              ),
-            ],
+
+                const Divider(height: 32),
+
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pushReplacementNamed(context, "/admin-login"),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.admin_panel_settings,
+                          color: Colors.green),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Admin Login",
+                        style:
+                            GoogleFonts.poppins(color: Colors.green),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _input(String label, TextEditingController controller, bool isPass) {
+  Widget _input(
+    IconData icon,
+    String label,
+    TextEditingController controller, {
+    bool isPassword = false,
+  }) {
     return TextField(
       controller: controller,
-      obscureText: isPass,
+      obscureText: isPassword,
+      style: GoogleFonts.poppins(fontSize: 15),
       decoration: InputDecoration(
+        prefixIcon: Icon(icon, color: Colors.green),
         labelText: label,
-        labelStyle: const TextStyle(color: Colors.black54),
         filled: true,
-        fillColor: Colors.grey.shade100,
+        fillColor: const Color(0xFFF2F2F2),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.grey.shade300),
-          borderRadius: BorderRadius.circular(14),
-        ),
-      ),
-    );
-  }
-
-  void _error(Locale locale) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: Colors.redAccent,
-        content: Text(
-          locale.languageCode == "ar"
-              ? "❌ البريد الإلكتروني أو كلمة المرور غير صحيحة"
-              : locale.languageCode == "he"
-                  ? "❌ שגיאה באימייל או סיסמה"
-                  : "❌ Incorrect email or password",
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
         ),
       ),
     );

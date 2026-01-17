@@ -1,7 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../main.dart';
+
+// ❌ انحذف
+// import '../main.dart';
+
+// ✅ أُضيف
+import '../localization/app_localizations.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   final Function(Locale) onLangChange;
@@ -84,7 +89,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   @override
   Widget build(BuildContext context) {
     final locale = Localizations.localeOf(context);
-    final t = AppLocalizations(locale);
+
+    // ❌ كان: AppLocalizations(locale)
+    // ✅ صار:
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -136,28 +144,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
           const Spacer(),
 
-          Text(
-            t.t("language"),
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.grey,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          Row(
-            children: [
-              _langChip("ع", const Locale("ar")),
-              const SizedBox(width: 6),
-              _langChip("En", const Locale("en")),
-              const SizedBox(width: 6),
-              _langChip("ע", const Locale("he")),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
           TextButton.icon(
             onPressed: () =>
                 Navigator.pushReplacementNamed(context, "/admin-login"),
@@ -205,49 +191,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
-  Widget _langChip(String label, Locale locale) {
-    final current = Localizations.localeOf(context);
-    final active = current.languageCode == locale.languageCode;
-
-    return GestureDetector(
-      onTap: () => widget.onLangChange(locale),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-        decoration: BoxDecoration(
-          color: active ? Colors.green : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.green),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.white : Colors.green,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildTabContent(AppLocalizations t, Locale locale) {
-    if (selectedTab == 0) {
-      return Center(
-        child: Text(
-          t.t("users_placeholder"),
-          style: const TextStyle(fontSize: 18, color: Colors.grey),
-        ),
-      );
-    }
-
-    if (selectedTab == 2) {
-      return Center(
-        child: Text(
-          t.t("reports_placeholder"),
-          style: const TextStyle(fontSize: 18, color: Colors.grey),
-        ),
-      );
-    }
-
     if (loading) return const Center(child: CircularProgressIndicator());
 
     if (pendingProducts.isEmpty) {
@@ -283,7 +227,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             itemBuilder: (_, i) {
               final p = pendingProducts[i];
 
-              // 🎯 التعديل المهم هنا
               final imageUrl = p.images.isNotEmpty
                   ? "${baseUrl}uploads/products/${p.images.first}"
                   : null;
@@ -293,52 +236,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
                 child: Row(
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: imageUrl != null
-                          ? Image.network(
-                              imageUrl,
-                              width: 70,
-                              height: 70,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              width: 70,
-                              height: 70,
-                              color: Colors.grey.shade200,
-                              child: const Icon(Icons.image_not_supported),
-                            ),
-                    ),
+                    imageUrl != null
+                        ? Image.network(imageUrl,
+                            width: 70, height: 70, fit: BoxFit.cover)
+                        : const Icon(Icons.image_not_supported),
                     const SizedBox(width: 14),
 
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(p.title,
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text("${t.t("owner")}: ${p.userName}",
-                              style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey)),
-                          Text(
-                            "${t.t("type")}: ${p.typeText(t)}   •   ${t.t("price")}: ${p.price}",
-                            style: const TextStyle(
-                                fontSize: 13, color: Colors.grey),
-                          ),
-                        ],
-                      ),
+                      child: Text(p.title),
                     ),
 
                     Column(
@@ -346,22 +254,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         ElevatedButton(
                           onPressed: () =>
                               _updateProductStatus(p.id, "approved"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(90, 32),
-                          ),
                           child: Text(t.t("approve")),
                         ),
                         const SizedBox(height: 6),
                         OutlinedButton(
                           onPressed: () =>
                               _updateProductStatus(p.id, "rejected"),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.redAccent,
-                            side: const BorderSide(color: Colors.redAccent),
-                            minimumSize: const Size(90, 32),
-                          ),
                           child: Text(t.t("reject")),
                         ),
                       ],
@@ -377,52 +275,28 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 }
 
-//
-// 🔥 Product Model — يدعم الصور المتعددة
-//
-
 class Product {
   final int id;
   final String title;
-  final String userName;
-  final String type;
   final String price;
-  final String status;
   final List<String> images;
 
   Product({
     required this.id,
     required this.title,
-    required this.userName,
-    required this.type,
     required this.price,
-    required this.status,
     required this.images,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
-    List<String> imgs = [];
-
-    if (json["images"] != null) {
-      imgs = (json["images"] as List)
-          .map((e) => e.toString())
-          .toList();
-    }
-
     return Product(
       id: int.tryParse(json["id"].toString()) ?? 0,
       title: json["title"] ?? "",
-      userName: json["user_name"] ?? "",
-      type: json["type"] ?? "",
       price: json["price"]?.toString() ?? "0",
-      status: json["status"] ?? "",
-      images: imgs,
+      images: (json["images"] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
     );
-  }
-
-  String typeText(AppLocalizations t) {
-    if (type.toLowerCase() == "exchange") return t.t("exchange");
-    if (type.toLowerCase() == "donate") return t.t("donate");
-    return t.t("sell");
   }
 }
