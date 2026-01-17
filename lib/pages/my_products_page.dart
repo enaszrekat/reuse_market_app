@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
+import '../theme/app_theme.dart';
 
 class MyProductsPage extends StatefulWidget {
   const MyProductsPage({super.key});
@@ -16,9 +18,7 @@ class _MyProductsPageState extends State<MyProductsPage>
 
   List<dynamic> myProducts = [];
   bool loading = true;
-
-  // ❗❗ عدّلي IP حسب جهازك
-  final String baseUrl = "http://10.100.11.28/market_app/";
+  String? errorMessage;
 
   @override
   void initState() {
@@ -37,24 +37,102 @@ class _MyProductsPageState extends State<MyProductsPage>
     super.dispose();
   }
 
-  Future<void> _loadMyProducts() async {
+  /// ✅ يرجع user_id سواء كان محفوظ int أو String
+  Future<int> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString("user_id") ?? "";
 
-    final response = await http.post(
-      Uri.parse("${baseUrl}get_user_products.php"),
-      body: {"user_id": userId},
-    );
+    final int? asInt = prefs.getInt("user_id");
+    if (asInt != null && asInt > 0) return asInt;
 
-    final data = json.decode(response.body);
+    final String? asString = prefs.getString("user_id");
+    final int parsed = int.tryParse(asString ?? "") ?? 0;
+    return parsed;
+  }
 
-    if (data["status"] == "success") {
+  Future<void> _loadMyProducts() async {
+    try {
       setState(() {
-        myProducts = data["products"];
-        loading = false;
+        loading = true;
+        errorMessage = null;
       });
-    } else {
-      setState(() => loading = false);
+
+      final userId = await _getUserId();
+
+      if (userId == 0) {
+        if (!mounted) return;
+        setState(() {
+          loading = false;
+          errorMessage = "Please login to view your products";
+        });
+        return;
+      }
+
+      final String base = AppConfig.baseUrl.endsWith('/')
+          ? AppConfig.baseUrl
+          : '${AppConfig.baseUrl}/';
+
+      final uri = Uri.parse("${base}get_user_products.php");
+
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              "Accept": "application/json",
+            },
+            body: {"user_id": userId.toString()},
+          )
+          .timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw Exception("Request timeout"),
+          );
+
+      if (response.statusCode != 200) {
+        throw Exception("Server returned status ${response.statusCode}");
+      }
+
+      final body = response.body.trim();
+      if (body.isEmpty) {
+        throw Exception("Empty response from server");
+      }
+
+      // إذا رجع HTML يعني PHP طبع خطأ / Warning / Fatal
+      if (body.contains('<!DOCTYPE') || body.contains('<html') || body.contains('<br')) {
+        debugPrint("❌ Backend returned HTML/text:\n$body");
+        throw Exception("Backend error (PHP output). Check get_user_products.php");
+      }
+
+      final dynamic decoded = json.decode(body);
+      if (decoded is! Map) {
+        throw Exception("Invalid JSON format");
+      }
+
+      final data = decoded as Map<String, dynamic>;
+
+      if (!mounted) return;
+
+      if (data["status"] == "success") {
+        final list = (data["products"] is List) ? data["products"] as List : [];
+
+        setState(() {
+          myProducts = list;
+          loading = false;
+          errorMessage = null;
+        });
+      } else {
+        setState(() {
+          loading = false;
+          errorMessage = data["message"]?.toString() ?? "Failed to load products";
+          myProducts = [];
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Error loading my products: $e");
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        errorMessage = e.toString().replaceFirst("Exception: ", "");
+        myProducts = [];
+      });
     }
   }
 
@@ -85,24 +163,139 @@ class _MyProductsPageState extends State<MyProductsPage>
     }
   }
 
+  Future<void> _deleteProduct(int productId) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surfaceDark,
+        title: Text(
+          "Delete Product",
+          style: AppTheme.textStyleTitle,
+        ),
+        content: Text(
+          "Are you sure you want to delete this product? This action cannot be undone.",
+          style: AppTheme.textStyleBody,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              "Cancel",
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.errorRed,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final userId = await _getUserId();
+      if (userId == 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Please login to delete products"),
+            backgroundColor: AppTheme.errorRed,
+          ),
+        );
+        return;
+      }
+
+      final String base = AppConfig.baseUrl.endsWith('/')
+          ? AppConfig.baseUrl
+          : '${AppConfig.baseUrl}/';
+
+      final uri = Uri.parse("${base}delete_product.php");
+
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              "Accept": "application/json",
+            },
+            body: {
+              "product_id": productId.toString(),
+              "user_id": userId.toString(),
+            },
+          )
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw Exception("Request timeout"),
+          );
+
+      if (!mounted) return;
+
+      if (response.statusCode != 200) {
+        throw Exception("Server returned status ${response.statusCode}");
+      }
+
+      final body = response.body.trim();
+      if (body.isEmpty) {
+        throw Exception("Empty response from server");
+      }
+
+      if (body.contains('<!DOCTYPE') || body.contains('<html')) {
+        throw Exception("Server returned HTML error");
+      }
+
+      final dynamic decoded = json.decode(body);
+      if (decoded is! Map) {
+        throw Exception("Invalid JSON format");
+      }
+
+      final data = decoded as Map<String, dynamic>;
+
+      if (data["status"] == "success") {
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data["message"]?.toString() ?? "Product deleted successfully"),
+            backgroundColor: AppTheme.primaryGreen,
+          ),
+        );
+
+        // Refresh the products list
+        _loadMyProducts();
+      } else {
+        throw Exception(data["message"]?.toString() ?? "Failed to delete product");
+      }
+    } catch (e) {
+      debugPrint("❌ Error deleting product: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Error: ${e.toString().replaceFirst("Exception: ", "")}"),
+          backgroundColor: AppTheme.errorRed,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
+    final String base = AppConfig.baseUrl.endsWith('/')
+        ? AppConfig.baseUrl
+        : '${AppConfig.baseUrl}/';
 
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundDark,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: AppTheme.backgroundDark,
         elevation: 0,
-        title: const Text(
-          "My Products",
-          style: TextStyle(
-            color: Color(0xFFFFD700),
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        title: const Text("My Products", style: AppTheme.textStyleTitle),
         centerTitle: true,
       ),
-
       body: Stack(
         children: [
           AnimatedBuilder(
@@ -125,61 +318,102 @@ class _MyProductsPageState extends State<MyProductsPage>
             },
           ),
 
-          loading
-              ? const Center(
-                  child: CircularProgressIndicator(color: Colors.amber),
-                )
-              : myProducts.isEmpty
-                  ? const Center(
-                      child: Text(
-                        "No products yet",
-                        style: TextStyle(color: Colors.white70, fontSize: 18),
-                      ),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: GridView.builder(
-                        itemCount: myProducts.length,
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 14,
-                          mainAxisSpacing: 14,
-                          childAspectRatio: 0.80,
-                        ),
-                        itemBuilder: (context, index) {
-                          final item = myProducts[index];
-
-                          // ⭐ جلب أول صورة فقط
-                          String imageUrl = "";
-                          if (item["images"] != null &&
-                              item["images"].isNotEmpty) {
-                            imageUrl =
-                                "${baseUrl}uploads/products/${item["images"][0]}";
-                          }
-
-                          return _ProductCard(
-                            title: item["title"] ?? "",
-                            price: item["price"]?.toString() ?? "",
-                            status: item["status"] ?? "",
-                            type: item["type"] ?? "",
-                            imageUrl: imageUrl,
-                            statusColor: _statusColor(item["status"] ?? ""),
-                            typeColor: _typeColor(item["type"] ?? ""),
-                          );
-                        },
-                      ),
+          if (loading)
+            const Center(
+              child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+            )
+          else if (errorMessage != null)
+            Center(
+              child: Padding(
+                padding: AppTheme.paddingPage,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline,
+                        color: AppTheme.errorRed,
+                        size: AppTheme.iconSizeXLarge),
+                    const SizedBox(height: AppTheme.spacingLarge),
+                    Text(
+                      errorMessage!,
+                      style: AppTheme.textStyleBodySecondary,
+                      textAlign: TextAlign.center,
                     ),
+                    const SizedBox(height: AppTheme.spacingLarge),
+                    ElevatedButton(
+                      onPressed: _loadMyProducts,
+                      style: AppTheme.primaryButtonStyle,
+                      child: const Text("Retry"),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (myProducts.isEmpty)
+            Center(
+              child: Text(
+                "No products yet",
+                style: AppTheme.textStyleSubtitle.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: AppTheme.paddingPage,
+              child: GridView.builder(
+                itemCount: myProducts.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: AppTheme.spacingMedium,
+                  mainAxisSpacing: AppTheme.spacingMedium,
+                  childAspectRatio: 0.80,
+                ),
+                itemBuilder: (context, index) {
+                  final item = myProducts[index] as Map;
+
+                  // ✅ صورة أولى من images
+                  String imageUrl = "";
+                  final images = item["images"];
+
+                  if (images is List && images.isNotEmpty) {
+                    final name = images.first.toString().trim();
+                    if (name.isNotEmpty) {
+                      imageUrl = "${base}uploads/products/$name";
+                    }
+                  } else if (item["image"] != null) {
+                    final name = item["image"].toString().trim();
+                    if (name.isNotEmpty) {
+                      imageUrl = "${base}uploads/products/$name";
+                    }
+                  }
+
+                  final price = double.tryParse(item["price"]?.toString() ?? "0") ?? 0;
+
+                  final status = item["status"]?.toString() ?? "";
+                  final type = item["type"]?.toString() ?? "";
+
+                  return _ProductCard(
+                    productId: int.tryParse(item["id"]?.toString() ?? "0") ?? 0,
+                    title: item["title"]?.toString() ?? "",
+                    price: price.toStringAsFixed(2),
+                    status: status,
+                    type: type,
+                    imageUrl: imageUrl,
+                    statusColor: _statusColor(status),
+                    typeColor: _typeColor(type),
+                    onDelete: () => _deleteProduct(int.tryParse(item["id"]?.toString() ?? "0") ?? 0),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-// ------------------------------------------------------
-// 🎴 بطاقة المنتج
-// ------------------------------------------------------
 class _ProductCard extends StatelessWidget {
+  final int productId;
   final String title;
   final String price;
   final String status;
@@ -187,8 +421,10 @@ class _ProductCard extends StatelessWidget {
   final String imageUrl;
   final Color statusColor;
   final Color typeColor;
+  final VoidCallback onDelete;
 
   const _ProductCard({
+    required this.productId,
     required this.title,
     required this.price,
     required this.status,
@@ -196,6 +432,7 @@ class _ProductCard extends StatelessWidget {
     required this.imageUrl,
     required this.statusColor,
     required this.typeColor,
+    required this.onDelete,
   });
 
   @override
@@ -224,49 +461,79 @@ class _ProductCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 📌 الصورة
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: imageUrl.isNotEmpty
-                ? Image.network(
-                    imageUrl,
-                    height: 80,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        const Icon(Icons.image_not_supported,
-                            color: Colors.white38, size: 40),
-                  )
-                : Container(
-                    height: 80,
-                    width: double.infinity,
-                    color: Colors.white12,
-                    child: const Icon(Icons.image, color: Colors.white38),
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        height: 80,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 80,
+                          width: double.infinity,
+                          color: AppTheme.surfaceSecondary,
+                          child: const Icon(Icons.image_not_supported,
+                              color: AppTheme.textTertiary, size: 40),
+                        ),
+                      )
+                    : Container(
+                        height: 80,
+                        width: double.infinity,
+                        color: AppTheme.surfaceSecondary,
+                        child: const Icon(Icons.image,
+                            color: AppTheme.textTertiary),
+                      ),
+              ),
+              // Delete button (trash icon) in top-right corner
+              Positioned(
+                top: 4,
+                right: 4,
+                child: InkWell(
+                  onTap: onDelete,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorRed.withOpacity(0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.white,
+                      size: 16,
+                    ),
                   ),
+                ),
+              ),
+            ],
           ),
 
-          const SizedBox(height: 10),
+          const SizedBox(height: AppTheme.spacingLarge),
 
           Text(
             title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
+            style: AppTheme.textStyleBodySmall
+                .copyWith(fontWeight: AppTheme.fontWeightBold),
           ),
 
-          const SizedBox(height: 4),
+          const SizedBox(height: AppTheme.spacingTiny),
 
           Text(
-            price.isEmpty ? "—" : "$price ₪",
-            style: const TextStyle(
-              color: Color(0xFFFFD700),
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
+            "$price ₪",
+            style: AppTheme.textStylePrice
+                .copyWith(fontSize: AppTheme.fontSizeBodySmall),
           ),
 
           const Spacer(),
@@ -286,6 +553,14 @@ class _ProductCard extends StatelessWidget {
                 status,
                 style: TextStyle(
                   color: statusColor.withOpacity(0.9),
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                type,
+                style: TextStyle(
+                  color: typeColor.withOpacity(0.9),
                   fontSize: 11,
                 ),
               ),

@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+// استيراد الصفحات
+import 'sell_product_page.dart';
+import 'trade_product_page.dart';
+import 'donate_item_page.dart';
+
 class AddProductSheet extends StatelessWidget {
   const AddProductSheet({super.key});
 
@@ -14,7 +19,7 @@ class AddProductSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // خط صغير فوق
+          // الخط الصغير فوق
           Container(
             width: 50,
             height: 5,
@@ -40,7 +45,7 @@ class AddProductSheet extends StatelessWidget {
             context,
             icon: Icons.sell,
             title: "Sell Product",
-            route: "/sell-product",
+            page: const SellProductPage(),
           ),
 
           const SizedBox(height: 16),
@@ -49,7 +54,7 @@ class AddProductSheet extends StatelessWidget {
             context,
             icon: Icons.sync_alt,
             title: "Trade Product",
-            route: "/trade-product",
+            page: const TradeProductPage(),
           ),
 
           const SizedBox(height: 16),
@@ -58,7 +63,7 @@ class AddProductSheet extends StatelessWidget {
             context,
             icon: Icons.volunteer_activism,
             title: "Donate Product",
-            route: "/donate-item",
+            page: const DonateItemPage(),
           ),
 
           const SizedBox(height: 10),
@@ -71,19 +76,26 @@ class AddProductSheet extends StatelessWidget {
     BuildContext context, {
     required IconData icon,
     required String title,
-    required String route,
+    required Widget page,
   }) {
     return InkWell(
       onTap: () {
-        Navigator.pop(context); // سكّر الـ sheet
-        Navigator.pushNamed(context, route);
+        Navigator.pop(context); // إغلاق الـ BottomSheet
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => page),
+        );
       },
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: Colors.greenAccent.withOpacity(0.08),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
+          border: Border.all(
+            color: Colors.greenAccent.withOpacity(0.3),
+          ),
         ),
         child: Row(
           children: [

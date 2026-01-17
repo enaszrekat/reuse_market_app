@@ -28,7 +28,7 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0E1412),
+      backgroundColor: const Color(0xFF0E0E0E),
 
       body: Center(
         child: ConstrainedBox(
@@ -69,7 +69,7 @@ class _MainLayoutState extends State<MainLayout> {
   // ⬇️ Bottom Navigation (محسّن)
   Widget _buildBottomBar() {
     return BottomAppBar(
-      color: const Color(0xFF151E1B),
+      color: const Color(0xFF0E0E0E),
       shape: const CircularNotchedRectangle(),
       notchMargin: 10,
       elevation: 8,
@@ -139,7 +139,7 @@ class _MainLayoutState extends State<MainLayout> {
                 fontWeight: FontWeight.w600,
                 color: isActive
                     ? const Color(0xFF3DDC97)
-                    : Colors.white38,
+                    : Colors.white.withOpacity(0.4),
               ),
             ),
 

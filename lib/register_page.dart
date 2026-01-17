@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 
 import 'services/email_service.dart';
 import 'localization/app_localizations.dart';
+import 'config.dart';
+import 'theme/app_theme.dart';
 
 class RegisterPage extends StatefulWidget {
   final Function(Locale) onLangChange;
@@ -44,7 +46,10 @@ class _RegisterPageState extends State<RegisterPage> {
   // SAVE USER TO DATABASE
   // ----------------------------------------------------------
   Future<bool> saveToDatabase() async {
-    final url = Uri.parse("http://localhost/market_app/register.php");
+    final base = AppConfig.baseUrl.endsWith('/') 
+        ? AppConfig.baseUrl 
+        : '${AppConfig.baseUrl}/';
+    final url = Uri.parse("${base}register.php");
 
     try {
       final response = await http.post(url, body: {
@@ -83,9 +88,23 @@ class _RegisterPageState extends State<RegisterPage> {
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        body: Center(
-          child: SingleChildScrollView(
-            child: _buildForm(t, isRtl),
+        backgroundColor: AppTheme.backgroundDark,
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppTheme.backgroundDark,
+                AppTheme.backgroundDark.withOpacity(0.95),
+                AppTheme.surfaceDark,
+              ],
+            ),
+          ),
+          child: Center(
+            child: SingleChildScrollView(
+              child: _buildForm(t, isRtl),
+            ),
           ),
         ),
       ),
@@ -95,16 +114,20 @@ class _RegisterPageState extends State<RegisterPage> {
   Widget _buildForm(AppLocalizations t, bool isRtl) {
     return Container(
       width: 480,
-      padding: const EdgeInsets.all(30),
+      padding: AppTheme.paddingPage,
       margin: const EdgeInsets.only(top: 30),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: AppTheme.surfaceDark,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+        border: Border.all(
+          color: AppTheme.primaryGreen.withOpacity(0.3),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: AppTheme.primaryGreen.withOpacity(0.2),
+            blurRadius: 40,
+            offset: const Offset(0, 25),
           ),
         ],
       ),
@@ -113,7 +136,7 @@ class _RegisterPageState extends State<RegisterPage> {
           Align(
             alignment: isRtl ? Alignment.topRight : Alignment.topLeft,
             child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios, color: Colors.green),
+              icon: const Icon(Icons.arrow_back_ios, color: AppTheme.primaryGreen),
               onPressed: () =>
                   Navigator.pushReplacementNamed(context, "/login"),
             ),
@@ -123,17 +146,16 @@ class _RegisterPageState extends State<RegisterPage> {
 
           Text(
             t.t("register"),
-            style: const TextStyle(
-              color: Colors.green,
+            style: AppTheme.textStyleHeadline.copyWith(
               fontSize: 28,
-              fontWeight: FontWeight.bold,
+              color: AppTheme.primaryGreen,
             ),
           ),
 
           const SizedBox(height: 6),
           Text(
             _stepTitle(t),
-            style: const TextStyle(color: Colors.grey),
+            style: AppTheme.textStyleBodySecondary,
           ),
 
           const SizedBox(height: 20),
@@ -174,7 +196,7 @@ class _RegisterPageState extends State<RegisterPage> {
       width: active ? 28 : 10,
       height: 10,
       decoration: BoxDecoration(
-        color: active ? Colors.green : Colors.green.withOpacity(0.3),
+        color: active ? AppTheme.primaryGreen : AppTheme.primaryGreen.withOpacity(0.3),
         borderRadius: BorderRadius.circular(20),
       ),
     );
@@ -247,7 +269,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     bool ok = await saveToDatabase();
     if (!ok) {
-      _showError("خطأ في حفظ البيانات");
+      _showError("Error saving data");
       return;
     }
 
@@ -267,16 +289,20 @@ class _RegisterPageState extends State<RegisterPage> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         if (step > 0)
-          ElevatedButton(
+          OutlinedButton(
             onPressed: () => setState(() => step--),
-            child: Text(t.t("back")),
+            style: AppTheme.secondaryButtonStyle,
+            child: Text(t.t("back"), style: AppTheme.textStyleBody),
           )
         else
           const SizedBox(width: 1),
         ElevatedButton(
           onPressed: _next,
-          child:
-              Text(step == 2 ? t.t("create_account") : t.t("next")),
+          style: AppTheme.primaryButtonStyle,
+          child: Text(
+            step == 2 ? t.t("create_account") : t.t("next"),
+            style: AppTheme.textStyleBody,
+          ),
         ),
       ],
     );
@@ -290,22 +316,61 @@ class _RegisterPageState extends State<RegisterPage> {
       controller: c,
       obscureText: isPass,
       maxLines: maxLines,
-      decoration: InputDecoration(labelText: label),
+      style: AppTheme.textStyleBody,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: AppTheme.textStyleBodySecondary,
+        filled: true,
+        fillColor: AppTheme.surfaceSecondary,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderSide: BorderSide(color: AppTheme.primaryGreen.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderSide: const BorderSide(color: AppTheme.primaryGreen, width: 2),
+        ),
+      ),
     );
   }
 
   Widget _switch(String title, bool v, Function(bool) on) {
-    return Row(
-      children: [
-        Expanded(child: Text(title)),
-        Switch(value: v, onChanged: on),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceSecondary.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: AppTheme.textStyleBody,
+            ),
+          ),
+          Switch(
+            value: v,
+            onChanged: on,
+            activeColor: AppTheme.primaryGreen,
+            activeTrackColor: AppTheme.primaryGreen.withOpacity(0.5),
+          ),
+        ],
+      ),
     );
   }
 
   void _showError(String m) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(m)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(m, style: AppTheme.textStyleBody),
+        backgroundColor: AppTheme.errorRed,
+      ),
+    );
   }
 
   String _stepTitle(AppLocalizations t) {

@@ -1,6 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'localization/app_localizations.dart';
+import 'config.dart';
+import 'theme/app_theme.dart';
+import 'components/premium_logo.dart';
 
 class LoginPage extends StatefulWidget {
   final Function(Locale) onLangChange;
@@ -11,92 +19,210 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final email = TextEditingController();
-  final password = TextEditingController();
+  final TextEditingController email = TextEditingController();
+  final TextEditingController password = TextEditingController();
 
-  void _changeLanguage() {
-    final current = Localizations.localeOf(context);
-    final newLocale =
-        current.languageCode == 'en' ? const Locale('ar') : const Locale('en');
-    widget.onLangChange(newLocale);
+  bool loading = false;
+
+
+  void _showLanguageSelector() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surfaceDark,
+        title: const Text("Select Language", style: AppTheme.textStyleTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.language, color: AppTheme.primaryGreen),
+              title: const Text("English", style: AppTheme.textStyleBody),
+              onTap: () {
+                widget.onLangChange(const Locale('en'));
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.language, color: AppTheme.primaryGreen),
+              title: const Text("العربية", style: AppTheme.textStyleBody),
+              onTap: () {
+                widget.onLangChange(const Locale('ar'));
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.language, color: AppTheme.primaryGreen),
+              title: const Text("עברית", style: AppTheme.textStyleBody),
+              onTap: () {
+                widget.onLangChange(const Locale('he'));
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  void _login() {
+  // ============================
+  // LOGIN (الحل الحقيقي)
+  // ============================
+  Future<void> _login() async {
     if (email.text.isEmpty || password.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill all fields")),
-      );
+      final locale = Localizations.localeOf(context);
+      final t = AppLocalizations(locale);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Please fill in all fields", style: AppTheme.textStyleBody),
+                    backgroundColor: AppTheme.errorRed,
+                  ),
+                );
       return;
     }
 
-    Navigator.pushReplacementNamed(context, "/home");
+    setState(() => loading = true);
+
+    try {
+      final base = AppConfig.baseUrl.endsWith('/') 
+          ? AppConfig.baseUrl 
+          : '${AppConfig.baseUrl}/';
+      final url = "${base}login.php";
+      
+      final response = await http.post(
+        Uri.parse(url),
+        body: {
+          "email": email.text.trim(),
+          "password": password.text.trim(),
+        },
+      );
+
+      final data = json.decode(response.body);
+
+      if (data["status"] == "success") {
+        final prefs = await SharedPreferences.getInstance();
+
+        // 🔥 أهم سطر بالمشروع كله
+        await prefs.setInt("user_id", data["user"]["id"]);
+        
+        // ✅ Force English locale after successful login
+        widget.onLangChange(const Locale('en'));
+
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, "/home");
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data["message"] ?? "Login failed", style: AppTheme.textStyleBody),
+            backgroundColor: AppTheme.errorRed,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Connection error. Please try again.", style: AppTheme.textStyleBody),
+          backgroundColor: AppTheme.errorRed,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
   }
 
+  // ============================
+  // UI
+  // ============================
   @override
   Widget build(BuildContext context) {
     final locale = Localizations.localeOf(context);
     final t = AppLocalizations(locale);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7F8),
-
-      /// 🔥 الحل هنا: Scroll قبل الـ Container
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 30),
-        child: Center(
-          child: Container(
-            width: MediaQuery.of(context).size.width < 500
-                ? double.infinity
-                : 460,
-            margin: const EdgeInsets.symmetric(horizontal: 20),
-            padding: const EdgeInsets.fromLTRB(40, 36, 40, 36),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(34),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 40,
-                  offset: const Offset(0, 25),
+      backgroundColor: AppTheme.backgroundDark,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.backgroundDark,
+              AppTheme.backgroundDark.withOpacity(0.95),
+              AppTheme.surfaceDark,
+            ],
+          ),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 30),
+          child: Center(
+            child: Container(
+              width: MediaQuery.of(context).size.width < 500
+                  ? double.infinity
+                  : 460,
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: AppTheme.paddingPage,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceDark,
+                borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+                border: Border.all(
+                  color: AppTheme.primaryGreen.withOpacity(0.3),
+                  width: 1,
                 ),
-              ],
-            ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryGreen.withOpacity(0.2),
+                    blurRadius: 40,
+                    offset: const Offset(0, 25),
+                  ),
+                ],
+              ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image.asset('assets/logo.png', height: 160),
+                // Premium Logo - Large and Centered
+                Center(
+                  child: PremiumLogoWithIcon(
+                    height: 220,
+                    showSubtitle: false,
+                  ),
+                ),
                 const SizedBox(height: 40),
 
-                /// TITLE + LANGUAGE
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       t.t("login"),
-                      style: GoogleFonts.poppins(
+                      style: AppTheme.textStyleHeadline.copyWith(
                         fontSize: 34,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.green,
+                        color: AppTheme.primaryGreen,
                       ),
                     ),
                     InkWell(
-                      onTap: _changeLanguage,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.language, color: Colors.green),
-                          const SizedBox(width: 6),
-                          Text(
-                            locale.languageCode == 'en'
-                                ? "English"
-                                : "العربية",
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              color: Colors.green,
-                              fontWeight: FontWeight.w500,
+                      onTap: _showLanguageSelector,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryGreen.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                          border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.language, color: AppTheme.primaryGreen, size: 20),
+                            const SizedBox(width: 6),
+                            Text(
+                              locale.languageCode == 'en'
+                                  ? "English"
+                                  : locale.languageCode == 'ar'
+                                      ? "العربية"
+                                      : "עברית",
+                              style: AppTheme.textStyleBodySmall.copyWith(
+                                color: AppTheme.primaryGreen,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -104,68 +230,57 @@ class _LoginPageState extends State<LoginPage> {
 
                 const SizedBox(height: 28),
 
-                _input(Icons.email_outlined, t.t("email"), email),
+                _input(Icons.email, t.t("email"), email),
                 const SizedBox(height: 18),
-                _input(Icons.lock_outline, t.t("password"), password,
+                _input(Icons.lock, t.t("password"), password,
                     isPassword: true),
 
                 const SizedBox(height: 34),
 
                 SizedBox(
                   width: double.infinity,
+                  height: 54,
                   child: ElevatedButton(
-                    onPressed: _login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                    ),
-                    child: Text(
-                      t.t("login"),
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    onPressed: loading ? null : _login,
+                    style: AppTheme.primaryButtonStyle,
+                    child: loading
+                        ? const CircularProgressIndicator(color: Colors.black)
+                        : Text(
+                            t.t("login"),
+                            style: AppTheme.textStyleBody.copyWith(
+                              fontSize: 18,
+                              fontWeight: AppTheme.fontWeightBold,
+                            ),
+                          ),
                   ),
                 ),
 
-                const SizedBox(height: 18),
+                const SizedBox(height: AppTheme.spacingLarge),
 
                 TextButton(
                   onPressed: () =>
                       Navigator.pushReplacementNamed(context, "/register"),
                   child: Text(
                     t.t("register"),
-                    style: GoogleFonts.poppins(
-                      color: Colors.green,
-                      fontWeight: FontWeight.w500,
+                    style: AppTheme.textStyleBody.copyWith(
+                      color: AppTheme.primaryGreen,
                     ),
                   ),
                 ),
 
-                const Divider(height: 32),
+                const SizedBox(height: AppTheme.spacingMedium),
+                Divider(color: AppTheme.primaryGreen.withOpacity(0.3)),
+                const SizedBox(height: AppTheme.spacingMedium),
 
-                TextButton(
+                OutlinedButton.icon(
                   onPressed: () =>
                       Navigator.pushReplacementNamed(context, "/admin-login"),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.admin_panel_settings,
-                          color: Colors.green),
-                      const SizedBox(width: 8),
-                      Text(
-                        "Admin Login",
-                        style:
-                            GoogleFonts.poppins(color: Colors.green),
-                      ),
-                    ],
-                  ),
+                  style: AppTheme.secondaryButtonStyle,
+                  icon: const Icon(Icons.admin_panel_settings, size: 20),
+                  label: const Text("Admin Login"),
                 ),
               ],
+            ),
             ),
           ),
         ),
@@ -182,15 +297,24 @@ class _LoginPageState extends State<LoginPage> {
     return TextField(
       controller: controller,
       obscureText: isPassword,
-      style: GoogleFonts.poppins(fontSize: 15),
+      style: AppTheme.textStyleBody,
       decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.green),
+        prefixIcon: Icon(icon, color: AppTheme.primaryGreen),
         labelText: label,
+        labelStyle: AppTheme.textStyleBodySecondary,
         filled: true,
-        fillColor: const Color(0xFFF2F2F2),
+        fillColor: AppTheme.surfaceSecondary,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
           borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderSide: BorderSide(color: AppTheme.primaryGreen.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderSide: const BorderSide(color: AppTheme.primaryGreen, width: 2),
         ),
       ),
     );

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
+import '../config.dart';
+import '../theme/app_theme.dart';
+import '../components/premium_logo.dart';
 
 class HomePage extends StatefulWidget {
   final Function(Locale) onLangChange;
@@ -20,8 +23,6 @@ class _HomePageState extends State<HomePage>
   bool loading = true;
   int unread = 0;
 
-  final String baseUrl = "http://10.100.11.28/market_app/";
-
   @override
   void initState() {
     super.initState();
@@ -37,41 +38,71 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _loadApprovedProducts() async {
     try {
-      final response =
-          await http.get(Uri.parse("${baseUrl}get_approved_products.php"));
+      final response = await http.get(
+        Uri.parse("${AppConfig.baseUrl}get_approved_products.php"),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception("Request timeout");
+        },
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception("Server returned status ${response.statusCode}");
+      }
+
+      if (response.body.isEmpty || response.body.trim().isEmpty) {
+        throw Exception("Empty response from server");
+      }
+
+      if (response.body.contains('<!DOCTYPE') || response.body.contains('<html')) {
+        throw Exception("Server returned HTML error");
+      }
 
       final data = json.decode(response.body);
 
       if (data["status"] == "success") {
         setState(() {
-          products = data["products"];
+          products = data["products"] ?? [];
           loading = false;
         });
       } else {
         setState(() => loading = false);
       }
     } catch (e) {
+      debugPrint("Error loading approved products: $e");
       setState(() => loading = false);
     }
   }
 
   Future<void> _loadUnreadNotifications() async {
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString("user_id") ?? "0";
+    final userId = prefs.getInt("user_id") ?? 0;
+
+    if (userId == 0) return;
 
     try {
       final response = await http.get(
-        Uri.parse("${baseUrl}get_unread_notifications.php?user_id=$userId"),
+        Uri.parse("${AppConfig.baseUrl}get_unread_notifications.php?user_id=$userId"),
+      ).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          return http.Response("", 408);
+        },
       );
 
-      final data = json.decode(response.body);
-
-      if (data["status"] == "success") {
-        setState(() {
-          unread = data["unread"];
-        });
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
+        final data = json.decode(response.body);
+        if (data["status"] == "success") {
+          setState(() {
+            unread = data["unread"] ?? 0;
+          });
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      // Silently fail for notifications
+      debugPrint("Error loading notifications: $e");
+    }
   }
 
   @override
@@ -120,39 +151,43 @@ class _HomePageState extends State<HomePage>
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Logo at the top
+            Center(
+              child: PremiumLogoWithIcon(
+                height: 120,
+                showSubtitle: true,
+              ),
+            ),
+            const SizedBox(height: AppTheme.spacingLarge),
             // 🔔 Welcome + Notifications
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   t.t("welcome_back"),
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.amber.shade200,
-                  ),
+                  style: AppTheme.textStyleHeadline.copyWith(color: AppTheme.primaryGreen),
                 ),
                 IconButton(
                   icon: Stack(
                     children: [
                       const Icon(Icons.notifications,
-                          color: Colors.amber, size: 30),
+                          color: AppTheme.primaryGreen, size: 30),
                       if (unread > 0)
                         Positioned(
                           right: 0,
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: const BoxDecoration(
-                              color: Colors.red,
+                              color: AppTheme.errorRed,
                               shape: BoxShape.circle,
                             ),
                             child: Text(
                               unread.toString(),
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 10),
+                                  color: Colors.white, fontSize: AppTheme.fontSizeTiny),
                             ),
                           ),
                         ),
@@ -166,14 +201,11 @@ class _HomePageState extends State<HomePage>
               ],
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: AppTheme.spacingLarge),
 
             Text(
               t.t("choose_action"),
-              style: TextStyle(
-                fontSize: 17,
-                color: Colors.white.withOpacity(0.8),
-              ),
+              style: AppTheme.textStyleSubtitle.copyWith(color: AppTheme.textSecondary),
             ),
 
             const SizedBox(height: 35),
@@ -202,15 +234,13 @@ class _HomePageState extends State<HomePage>
             Expanded(
               child: loading
                   ? const Center(
-                      child:
-                          CircularProgressIndicator(color: Colors.amber),
+                      child: CircularProgressIndicator(color: AppTheme.primaryGreen),
                     )
                   : products.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
                             "No approved products yet",
-                            style: TextStyle(
-                                color: Colors.white70, fontSize: 18),
+                            style: AppTheme.textStyleSubtitle.copyWith(color: AppTheme.textSecondary),
                           ),
                         )
                       : GridView.builder(
@@ -223,15 +253,43 @@ class _HomePageState extends State<HomePage>
                             childAspectRatio: 0.80,
                           ),
                           itemBuilder: (context, index) {
-                            final p = products[index];
-                            final img =
-                                "${baseUrl}uploads/products/${p["image"]}";
+                            try {
+                              final p = products[index];
+                              
+                              // ✅ Handle both images array and single image field
+                              final base = AppConfig.baseUrl.endsWith('/') 
+                                  ? AppConfig.baseUrl 
+                                  : '${AppConfig.baseUrl}/';
+                              String img = "";
+                              
+                              if (p["images"] != null && p["images"] is List && (p["images"] as List).isNotEmpty) {
+                                final imageName = (p["images"] as List)[0].toString().trim();
+                                if (imageName.isNotEmpty) {
+                                  img = "${base}uploads/products/$imageName";
+                                }
+                              } else if (p["image"] != null && p["image"].toString().trim().isNotEmpty) {
+                                final imageName = p["image"].toString().trim();
+                                img = "${base}uploads/products/$imageName";
+                              }
 
-                            return _productCard(
-                              p["title"],
-                              p["price"] ?? "",
-                              img,
-                            );
+                              // ✅ Safely parse price
+                              final price = double.tryParse(p["price"]?.toString() ?? "0") ?? 0.0;
+                              
+                              return _productCard(
+                                p["title"]?.toString() ?? "",
+                                price.toStringAsFixed(2),
+                                img,
+                              );
+                            } catch (e) {
+                              debugPrint("Error building product card in home: $e");
+                              return Container(
+                                padding: const EdgeInsets.all(16),
+                                child: const Text(
+                                  "Error",
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                              );
+                            }
                           },
                         ),
             )
@@ -263,13 +321,13 @@ class _HomePageState extends State<HomePage>
           children: [
             Text(
               title,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 20,
-                color: Colors.amber.shade200,
+                color: Color(0xFF3DDC97),
                 fontWeight: FontWeight.bold,
               ),
             ),
-            Icon(icon, size: 32, color: Colors.amber.shade300),
+            const Icon(icon, size: 32, color: Color(0xFF3DDC97)),
           ],
         ),
       ),
@@ -296,12 +354,44 @@ class _HomePageState extends State<HomePage>
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.network(
-              imageUrl,
-              height: 80,
-              width: double.infinity,
-              fit: BoxFit.cover,
-            ),
+            child: imageUrl.isNotEmpty
+                ? Image.network(
+                    imageUrl,
+                    height: 80,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Container(
+                        height: 80,
+                        width: double.infinity,
+                        color: Colors.white12,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: loadingProgress.expectedTotalBytes != null
+                                ? loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!
+                                : null,
+                            color: const Color(0xFF3DDC97),
+                            strokeWidth: 2,
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => Container(
+                      height: 80,
+                      width: double.infinity,
+                      color: Colors.white12,
+                      child: const Icon(Icons.image_not_supported,
+                          color: Colors.white38, size: 40),
+                    ),
+                  )
+                : Container(
+                    height: 80,
+                    width: double.infinity,
+                    color: Colors.white12,
+                    child: const Icon(Icons.image, color: Colors.white38),
+                  ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -315,9 +405,9 @@ class _HomePageState extends State<HomePage>
           ),
           const Spacer(),
           Text(
-            "$price ₪",
+            price.isEmpty ? "—" : "$price ₪",
             style: const TextStyle(
-              color: Color(0xFFFFD700),
+              color: Color(0xFF3DDC97),
               fontWeight: FontWeight.bold,
             ),
           ),

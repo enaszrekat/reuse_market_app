@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'chat_page.dart';
+import '../config.dart';
+import '../theme/app_theme.dart';
 
 class InboxPage extends StatefulWidget {
   const InboxPage({super.key});
@@ -13,7 +15,6 @@ class InboxPage extends StatefulWidget {
 }
 
 class _InboxPageState extends State<InboxPage> {
-  final String baseUrl = "http://10.100.11.28/market_app/";
   final TextEditingController _search = TextEditingController();
 
   List conversations = [];
@@ -36,27 +37,173 @@ class _InboxPageState extends State<InboxPage> {
 
   Future<void> _loadInbox() async {
     final prefs = await SharedPreferences.getInstance();
-    myId = int.tryParse(prefs.getString("user_id") ?? "0") ?? 0;
+    // ✅ استخدام getInt بدلاً من getString لأن login_page.dart يستخدم setInt
+    myId = prefs.getInt("user_id") ?? 0;
+
+    if (myId == 0) {
+      setState(() => loading = false);
+      return;
+    }
 
     try {
+      debugPrint("InboxPage: Loading conversations for user_id=$myId");
+      
       final res = await http.get(
-        Uri.parse("${baseUrl}get_conversations.php?user_id=$myId"),
+        Uri.parse("${AppConfig.baseUrl}get_conversations.php?user_id=$myId"),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception("Request timeout");
+        },
       );
 
-      final data = json.decode(res.body);
+      debugPrint("InboxPage: API Response Status: ${res.statusCode}");
+      debugPrint("InboxPage: API Response Body: ${res.body}");
 
-      if (data["status"] == "success") {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        debugPrint("InboxPage: Server returned status ${res.statusCode}");
+        setState(() => loading = false);
+        return;
+      }
+
+      Map<String, dynamic>? data;
+      try {
+        if (res.body.isNotEmpty && res.body.trim().isNotEmpty) {
+          data = json.decode(res.body) as Map<String, dynamic>;
+        }
+      } catch (jsonError) {
+        debugPrint("InboxPage: JSON decode error: $jsonError");
+        setState(() => loading = false);
+        return;
+      }
+
+      if (data != null && data["status"] == "success") {
+        final List conversationsList = data["conversations"] ?? [];
+        debugPrint("InboxPage: Loaded ${conversationsList.length} conversations");
+        
+        // ✅ إثراء البيانات بآخر رسالة إذا لم تكن موجودة
+        final enrichedConversations = await _enrichConversationsWithLastMessage(conversationsList);
+        
         setState(() {
-          conversations = data["conversations"] ?? [];
+          conversations = enrichedConversations;
           filtered = conversations;
           loading = false;
         });
       } else {
-        loading = false;
+        debugPrint("InboxPage: API returned error: ${data?["message"] ?? "Unknown error"}");
+        setState(() => loading = false);
       }
-    } catch (_) {
-      loading = false;
+    } catch (e) {
+      debugPrint("InboxPage: Error loading inbox: $e");
+      setState(() => loading = false);
     }
+  }
+
+  // ===============================
+  // ENRICH CONVERSATIONS WITH LAST MESSAGE
+  // ===============================
+  Future<List> _enrichConversationsWithLastMessage(List conversationsList) async {
+    final List enriched = [];
+    
+    for (var conv in conversationsList) {
+      final conversationId = int.tryParse(conv["conversation_id"]?.toString() ?? "") ?? 0;
+      
+      // ✅ إنشاء نسخة من المحادثة للتحسين
+      final enrichedConv = Map<String, dynamic>.from(conv);
+      
+      // ✅ محاولة استخراج آخر رسالة من حقول مختلفة (للتوافق مع تنسيقات مختلفة)
+      String? lastMessage = conv["last_message"]?.toString() ?? 
+                           conv["latest_message"]?.toString() ?? 
+                           conv["message"]?.toString() ?? 
+                           conv["text"]?.toString();
+      
+      String? lastMessageTime = conv["last_message_time"]?.toString() ?? 
+                               conv["latest_message_time"]?.toString() ?? 
+                               conv["last_message_timestamp"]?.toString() ?? 
+                               conv["updated_at"]?.toString() ?? 
+                               conv["last_activity"]?.toString();
+      
+      // ✅ إذا كانت آخر رسالة موجودة بالفعل، استخدمها
+      if (lastMessage != null && lastMessage.isNotEmpty &&
+          lastMessageTime != null && lastMessageTime.isNotEmpty) {
+        enrichedConv["last_message"] = lastMessage;
+        enrichedConv["last_message_time"] = lastMessageTime;
+        debugPrint("InboxPage: Conversation $conversationId already has last message: $lastMessage");
+        enriched.add(enrichedConv);
+        continue;
+      }
+      
+      // ✅ إذا لم تكن موجودة، احصل على آخر رسالة من API
+      if (conversationId > 0) {
+        try {
+          debugPrint("InboxPage: Fetching last message for conversation $conversationId");
+          
+          // ✅ محاولة الحصول على آخر رسالة (بدون limit أولاً، ثم نأخذ الأولى)
+          final msgRes = await http.get(
+            Uri.parse("${AppConfig.baseUrl}get_messages.php?conversation_id=$conversationId"),
+          ).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              throw Exception("Request timeout");
+            },
+          );
+          
+          if (msgRes.statusCode >= 200 && msgRes.statusCode < 300) {
+            try {
+              if (msgRes.body.isNotEmpty && msgRes.body.trim().isNotEmpty) {
+                final msgData = json.decode(msgRes.body) as Map<String, dynamic>;
+                
+                if (msgData["status"] == "success") {
+                  final List messages = msgData["messages"] ?? [];
+                  
+                  if (messages.isNotEmpty) {
+                    // ✅ ترتيب الرسائل حسب الوقت (الأحدث أولاً)
+                    messages.sort((a, b) {
+                      final timeA = DateTime.tryParse(a["created_at"]?.toString() ?? 
+                                                     a["timestamp"]?.toString() ?? "") ?? DateTime(1970);
+                      final timeB = DateTime.tryParse(b["created_at"]?.toString() ?? 
+                                                     b["timestamp"]?.toString() ?? "") ?? DateTime(1970);
+                      return timeB.compareTo(timeA); // DESC order
+                    });
+                    
+                    // ✅ أخذ آخر رسالة (الأحدث)
+                    final lastMsg = messages.first;
+                    
+                    // ✅ تحديث بيانات المحادثة
+                    enrichedConv["last_message"] = lastMsg["message"] ?? 
+                                                   lastMsg["text"] ?? 
+                                                   lastMsg["content"] ?? "";
+                    enrichedConv["last_message_time"] = lastMsg["created_at"] ?? 
+                                                       lastMsg["timestamp"] ?? 
+                                                       lastMsg["date"] ?? "";
+                    
+                    debugPrint("InboxPage: Enriched conversation $conversationId with last message: ${enrichedConv["last_message"]}");
+                    enriched.add(enrichedConv);
+                    continue;
+                  }
+                }
+              }
+            } catch (e) {
+              debugPrint("InboxPage: Error parsing last message for conversation $conversationId: $e");
+            }
+          }
+        } catch (e) {
+          debugPrint("InboxPage: Error fetching last message for conversation $conversationId: $e");
+        }
+      }
+      
+      // ✅ إذا فشل الحصول على آخر رسالة، استخدم البيانات الأصلية مع قيم افتراضية
+      if (enrichedConv["last_message"] == null || enrichedConv["last_message"].toString().isEmpty) {
+        enrichedConv["last_message"] = "No messages yet";
+      }
+      if (enrichedConv["last_message_time"] == null || enrichedConv["last_message_time"].toString().isEmpty) {
+        enrichedConv["last_message_time"] = DateTime.now().toIso8601String();
+      }
+      
+      enriched.add(enrichedConv);
+    }
+    
+    return enriched;
   }
 
   void _filter() {
@@ -97,18 +244,15 @@ class _InboxPageState extends State<InboxPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0E1412),
+      backgroundColor: AppTheme.backgroundDark,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0E1412),
+        backgroundColor: AppTheme.backgroundDark,
         elevation: 0,
-        title: const Text(
-          "Inbox",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text("Inbox", style: AppTheme.textStyleTitle),
       ),
       body: loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF3DDC97)),
+              child: CircularProgressIndicator(color: AppTheme.primaryGreen),
             )
           : Column(
               children: [
@@ -129,19 +273,18 @@ class _InboxPageState extends State<InboxPage> {
 
   Widget _searchBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: EdgeInsets.fromLTRB(AppTheme.spacingLarge, AppTheme.spacingSmall, AppTheme.spacingLarge, AppTheme.spacingMedium),
       child: TextField(
         controller: _search,
-        style: const TextStyle(color: Colors.white),
+        style: AppTheme.textStyleBody,
         decoration: InputDecoration(
           hintText: "Search chats...",
-          hintStyle: const TextStyle(color: Colors.white38),
-          prefixIcon:
-              const Icon(Icons.search, color: Colors.white38),
+          hintStyle: AppTheme.textStyleBodySmall,
+          prefixIcon: const Icon(Icons.search, color: AppTheme.textTertiary),
           filled: true,
-          fillColor: const Color(0xFF151E1B),
+          fillColor: AppTheme.surfaceDark,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
             borderSide: BorderSide.none,
           ),
         ),
@@ -175,8 +318,8 @@ class _InboxPageState extends State<InboxPage> {
         ],
       ),
       child: InkWell(
-        onTap: () {
-          Navigator.push(
+        onTap: () async {
+          await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => ChatPage(
@@ -187,7 +330,12 @@ class _InboxPageState extends State<InboxPage> {
                 productTitle: c["product_title"] ?? "",
               ),
             ),
-          ).then((_) => _loadInbox());
+          );
+          // ✅ إعادة تحميل الصندوق الوارد بعد العودة من المحادثة
+          // هذا يضمن تحديث آخر رسالة وعدد الرسائل غير المقروءة
+          if (mounted) {
+            _loadInbox();
+          }
         },
         child: Container(
           padding:
@@ -292,7 +440,7 @@ class _InboxPageState extends State<InboxPage> {
 
   Future<void> _archive(Map c) async {
     await http.post(
-      Uri.parse("${baseUrl}archive_conversation.php"),
+      Uri.parse("${AppConfig.baseUrl}archive_conversation.php"),
       body: {
         "conversation_id": c["conversation_id"].toString(),
         "user_id": myId.toString(),
@@ -303,7 +451,7 @@ class _InboxPageState extends State<InboxPage> {
 
   Future<void> _delete(Map c) async {
     await http.post(
-      Uri.parse("${baseUrl}delete_conversation.php"),
+      Uri.parse("${AppConfig.baseUrl}delete_conversation.php"),
       body: {
         "conversation_id": c["conversation_id"].toString(),
         "user_id": myId.toString(),
